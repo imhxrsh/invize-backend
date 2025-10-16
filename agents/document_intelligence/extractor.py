@@ -732,5 +732,4 @@ class FieldExtractor:
 
             return base
         except Exception as e:
-            logger.warning(f"LayoutLM extraction failed, using fallback: {e}")
             return self._extract_with_rules(ocr_result, doc_type)

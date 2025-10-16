@@ -6,9 +6,16 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from agents.hello_agent import get_hello_agent
 from agents.document_intelligence import router as doc_intel_router
+from auth.router import router as auth_router
+from profile.router import router as profile_router
+from users.router import router as users_router
+from db.prisma import prisma
+from db.mongo import ensure_ttl_indexes
 from dotenv import load_dotenv
 
 # Load environment variables early
@@ -46,9 +53,24 @@ async def lifespan(app: FastAPI):
     app.state.service_version = os.getenv("SERVICE_VERSION", "0.1.0")
     app.state.env = os.getenv("APP_ENV", "development")
 
+    # Initialize Prisma and ensure DB indexes
+    try:
+        await prisma.connect()
+        await ensure_ttl_indexes()
+        app.state.db_ready = True
+        logger.info("Prisma connected and TTL indexes ensured")
+    except Exception as e:
+        app.state.db_ready = False
+        logger.exception("Database initialization failed: %s", e)
+
     yield
 
     # Shutdown: cleanup (nothing persistent yet)
+    try:
+        await prisma.disconnect()
+        logger.info("Prisma disconnected")
+    except Exception:
+        pass
     logger.info("Shutting down %s", app.state.service_name)
 
 
@@ -61,8 +83,35 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# CORS configuration for frontend integration
+_origins_env = os.getenv("CORS_ALLOW_ORIGINS", "")
+allow_origins = [o.strip() for o in _origins_env.split(",") if o.strip()] or [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Refresh-Token"],
+)
+
 # Register routers
 app.include_router(doc_intel_router)
+app.include_router(auth_router)
+app.include_router(profile_router)
+app.include_router(users_router)
+
+# Static mount for uploads (avatars, etc.)
+uploads_dir = os.path.join(os.getcwd(), "uploads")
+os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 
 # Simple request ID middleware for tracking
