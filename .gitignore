@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environments
+.env
+.env.local
+.env.*.local
+venv/
+.venv/
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Build/Cache
+dist/
+build/
+.cache/
+*.log
+
+# Agent workspace outputs (adjust as needed)
+agent_workspace/uploads/
+agent_workspace/temp/
+agent_workspace/**/*.json
