@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-RUN mkdir -p /app/.cache/prisma-python/nodeenv
+# Do not mkdir PRISMA_NODEENV_CACHE_DIR: if it exists empty, Prisma skips nodeenv install and `bin/` is missing (assert in _node.py).
 
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
