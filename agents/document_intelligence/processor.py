@@ -47,6 +47,21 @@ class DocumentProcessor:
             self._update_status(job_id, DocumentStatus.PROCESSING, "Validating results...")
             validated_data = self._validate_and_normalize(extracted_data)
 
+            # Step 3b: Optional Groq JSON fill for missing totals / invoice # (Context7 groq-python)
+            self._update_status(job_id, DocumentStatus.PROCESSING, "Enriching fields (optional LLM)...")
+            raw_for_groq = validated_data.get("raw_text") or ""
+            if not raw_for_groq and ocr_result:
+                raw_for_groq = ocr_result.get("full_text") or ""
+            try:
+                from .groq_extract import enrich_extracted_with_groq
+                validated_data["extracted_data"] = await enrich_extracted_with_groq(
+                    validated_data["extracted_data"],
+                    raw_for_groq or None,
+                    job_id,
+                )
+            except Exception as e:
+                logger.warning("Groq extraction enrich skipped for job %s: %s", job_id, e)
+
             # Step 4: Optional Swarms agent analysis (Context7)
             self._update_status(job_id, DocumentStatus.PROCESSING, "Analyzing with agent...")
             try:

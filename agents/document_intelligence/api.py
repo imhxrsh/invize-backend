@@ -95,6 +95,10 @@ def _list_documents_from_fs():
             result_file = UPLOADS_DIR / f"{job_id}_result.json"
             vendor = None
             total = None
+            invoice_number = None
+            currency = None
+            approval_status = None
+            has_exception = False
             if result_file.exists():
                 try:
                     with open(result_file, "r") as rp:
@@ -103,9 +107,17 @@ def _list_documents_from_fs():
                     if isinstance(ed, dict):
                         vendor = ed.get("supplier")
                         total = ed.get("total")
+                        invoice_number = ed.get("invoice_number")
+                        currency = ed.get("currency") or ed.get("currency_symbol")
                     else:
                         vendor = getattr(ed, "supplier", None)
                         total = getattr(ed, "total", None)
+                    ow = res.get("operations_workflow") or {}
+                    if isinstance(ow, dict):
+                        summ = ow.get("approval_summary") or {}
+                        if isinstance(summ, dict):
+                            approval_status = summ.get("status")
+                        has_exception = bool(ow.get("exception"))
                 except Exception:
                     pass
             out.append({
@@ -115,6 +127,10 @@ def _list_documents_from_fs():
                 "created_at": created_at,
                 "vendor": vendor,
                 "total": total,
+                "invoice_number": invoice_number,
+                "currency": currency,
+                "approval_status": approval_status,
+                "has_exception": has_exception,
             })
         except Exception as e:
             logger.warning("Skip status file %s: %s", f, e)

@@ -17,6 +17,7 @@ from user_profile.router import router as profile_router
 from users.router import router as users_router
 from integrations.router import router as integrations_router
 from administration.router import router as admin_router
+from agents.payments import payments_router
 from db.prisma import prisma
 from db.mongo import ensure_ttl_indexes
 from dotenv import load_dotenv
@@ -116,6 +117,7 @@ def include_domain_routers(application: FastAPI, *, api_prefix: str | None = Non
     application.include_router(users_router, **kw)
     application.include_router(integrations_router, **kw)
     application.include_router(admin_router, **kw)
+    application.include_router(payments_router, **kw)
 
 
 # Bare paths (Next proxy strips /api before upstream) and /api/* (direct gateway / misconfigured path)

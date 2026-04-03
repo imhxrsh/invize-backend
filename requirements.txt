@@ -449,6 +449,8 @@ yarl==1.22.0
     # via aiohttp
 zipp==3.23.0
     # via importlib-metadata
+groq==0.18.0
+    # via invize document intelligence (optional extraction enrich)
 
 # The following packages are considered to be unsafe in a requirements file:
 # setuptools

@@ -180,3 +180,28 @@ model IntegrationConfig {
   value     String
   updatedAt DateTime @updatedAt
 }
+
+/// Treasury execution is stubbed until a real PSP/bank adapter is wired.
+model PaymentBatch {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String?
+  status    String   @default("draft") // draft | scheduled | submitted | settled
+  orgId     String?  @db.ObjectId
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines PaymentLine[]
+}
+
+model PaymentLine {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  batchId   String   @db.ObjectId
+  batch     PaymentBatch @relation(fields: [batchId], references: [id])
+  jobId     String
+  amount    Float
+  currency  String   @default("INR")
+  createdAt DateTime @default(now())
+
+  @@unique([batchId, jobId])
+  @@index([jobId])
+}
