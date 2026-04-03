@@ -2,8 +2,9 @@
 # Build:  docker build -t invize-backend .
 # Run:    docker run --env-file .env -p 8000:8000 invize-backend
 #
-# XDG_CACHE_HOME=/app/.cache: prisma-python downloads the query engine here during `prisma generate`.
-# Without it, binaries land in /root/.cache and the non-root runtime user gets Permission denied.
+# Prisma Client Python uses Path.home() for its cache (NOT XDG_CACHE_HOME). As root during build,
+# that is /root/.cache → generated paths point there and appuser cannot stat them (PermissionError).
+# Force Prisma "home" and nodeenv under /app so chown appuser covers binaries + embedded paths.
 #
 # Required env at runtime: MONGO_URI, JWT_SECRET (see .env.example).
 # MongoDB must be a replica set for Prisma transactions (e.g. ?replicaSet=rs0).
@@ -15,7 +16,9 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PORT=8000 \
-    XDG_CACHE_HOME=/app/.cache
+    XDG_CACHE_HOME=/app/.cache \
+    PRISMA_HOME_DIR=/app \
+    PRISMA_NODEENV_CACHE_DIR=/app/.cache/prisma-python/nodeenv
 
 # OCR / PDF + OpenCV runtime libs + C++ toolchain (imagededup builds a Cython extension via g++)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -30,25 +33,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+RUN mkdir -p /app/.cache/prisma-python/nodeenv
+
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
 COPY . .
 
-# 1. Create the cache directory and set permissions BEFORE running generate
-RUN mkdir -p /app/.cache && chmod -R 777 /app/.cache
+RUN prisma generate && \
+    mkdir -p agent_workspace/uploads agent_workspace/temp
 
-# 2. Explicitly pass the cache home to the generate command
-RUN XDG_CACHE_HOME=/app/.cache prisma generate
-
-# 3. Create workspace folders
-RUN mkdir -p agent_workspace/uploads agent_workspace/temp
-
-# 4. Ensure appuser owns everything in /app
+# Non-root (adjust UID if your volume mount requires it)
 RUN useradd --create-home --uid 10001 appuser && \
     chown -R appuser:appuser /app
-
 USER appuser
 
 EXPOSE 8000
