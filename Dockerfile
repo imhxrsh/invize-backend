@@ -51,7 +51,8 @@ USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=8s --start-period=180s --retries=3 \
-    CMD sh -c "curl -fsS http://127.0.0.1:$${PORT}/health || exit 1"
+# No HEALTHCHECK: image checks can mark the container unhealthy while the app is still starting
+# (Prisma/Mongo, torch import, etc.) and cause Dokploy/Docker to kill/replace the container.
+# Use platform health settings or external probes if you need them; see Docker HEALTHCHECK NONE to clear inherited checks.
 
 CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port \"${PORT}\" --proxy-headers --forwarded-allow-ips='*'"]
