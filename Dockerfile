@@ -36,14 +36,19 @@ RUN pip install --upgrade pip && \
 
 COPY . .
 
-# Prisma engine binaries go under XDG_CACHE_HOME; must live under /app so non-root appuser can read them
-RUN mkdir -p /app/.cache && \
-    prisma generate && \
-    mkdir -p agent_workspace/uploads agent_workspace/temp
+# 1. Create the cache directory and set permissions BEFORE running generate
+RUN mkdir -p /app/.cache && chmod -R 777 /app/.cache
 
-# Non-root (adjust UID if your volume mount requires it)
+# 2. Explicitly pass the cache home to the generate command
+RUN XDG_CACHE_HOME=/app/.cache prisma generate
+
+# 3. Create workspace folders
+RUN mkdir -p agent_workspace/uploads agent_workspace/temp
+
+# 4. Ensure appuser owns everything in /app
 RUN useradd --create-home --uid 10001 appuser && \
     chown -R appuser:appuser /app
+
 USER appuser
 
 EXPOSE 8000
