@@ -182,7 +182,7 @@ numpy==2.2.6
     #   -r requirements.in
     #   contourpy
     #   matplotlib
-    #   opencv-python
+    #   opencv-python-headless
     #   pywavelets
     #   scikit-learn
     #   scipy
@@ -231,7 +231,7 @@ openai==2.21.0
     # via
     #   -r requirements.in
     #   litellm
-opencv-python==4.13.0.92
+opencv-python-headless==4.13.0.92
     # via -r requirements.in
 packaging==26.0
     # via

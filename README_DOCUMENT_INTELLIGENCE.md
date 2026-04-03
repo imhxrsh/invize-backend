@@ -138,7 +138,7 @@ agents/document_intelligence/
 
 The prototype requires these additional packages in requirements.txt:
 ```
-opencv-python
+opencv-python-headless
 pytesseract
 pdf2image
 pillow
