@@ -13,8 +13,9 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PORT=8000
 
-# OCR / PDF + minimal libs for OpenCV wheels
+# OCR / PDF + OpenCV runtime libs + C++ toolchain (imagededup builds a Cython extension via g++)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     curl \
     tesseract-ocr \
     tesseract-ocr-eng \
