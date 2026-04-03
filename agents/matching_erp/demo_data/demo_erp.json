@@ -1,0 +1,71 @@
+{
+	"description": "Demo ERP data only. Tally and SAP connectors to be built later.",
+	"pos": [
+		{
+			"id": "po-demo-001",
+			"po_number": "PO-DEMO-001",
+			"supplier_ref": "Acme Corp",
+			"total": 1500.0,
+			"tax": 150.0,
+			"line_items": [
+				{
+					"item_code": "ITEM-001",
+					"quantity": 10,
+					"unit_price": 50.0,
+					"amount": 500.0
+				},
+				{
+					"item_code": "ITEM-002",
+					"quantity": 20,
+					"unit_price": 50.0,
+					"amount": 1000.0
+				}
+			]
+		},
+		{
+			"id": "po-demo-002",
+			"po_number": "PO-DEMO-002",
+			"supplier_ref": "Demo Supplier Ltd",
+			"total": 2500.5,
+			"tax": 250.05,
+			"line_items": [
+				{
+					"item_code": "SKU-A",
+					"quantity": 5,
+					"unit_price": 100.0,
+					"amount": 500.0
+				},
+				{
+					"item_code": "SKU-B",
+					"quantity": 10,
+					"unit_price": 200.05,
+					"amount": 2000.5
+				}
+			]
+		}
+	],
+	"grns": [
+		{
+			"id": "grn-demo-001",
+			"po_id": "po-demo-001",
+			"line_items": [
+				{
+					"item_code": "ITEM-001",
+					"received_quantity": 10,
+					"amount": 500.0
+				},
+				{
+					"item_code": "ITEM-002",
+					"received_quantity": 20,
+					"amount": 1000.0
+				}
+			],
+			"total_amount": 1500.0
+		}
+	],
+	"vendors": [
+		{ "name": "Acme Corp", "erp_id": "V-ACME-001", "valid": true },
+		{ "name": "Demo Supplier Ltd", "erp_id": "V-DEMO-002", "valid": true },
+		{ "name": "Acme Corporation", "erp_id": "V-ACME-001", "valid": true }
+	]
+}
