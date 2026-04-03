@@ -1,0 +1,28 @@
+# Git / local
+.git
+.gitignore
+*.md
+.pytest_cache
+__pycache__
+*.py[cod]
+*.egg-info
+.venv
+venv
+
+# Secrets (inject via Dokploy env)
+.env
+.env.*
+!.env.example
+
+# Runtime uploads (mount a volume in Dokploy if you need persistence)
+agent_workspace/uploads/*
+agent_workspace/temp/*
+!agent_workspace/uploads/.gitkeep
+!agent_workspace/temp/.gitkeep
+
+# IDE
+.idea
+.vscode
+
+# Tests (optional shrink context)
+tests
