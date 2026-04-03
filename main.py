@@ -105,19 +105,29 @@ app.add_middleware(
     expose_headers=["X-Refresh-Token"],
 )
 
-# Register routers
-app.include_router(doc_intel_router)
-app.include_router(workflow_router)
-app.include_router(auth_router)
-app.include_router(profile_router)
-app.include_router(users_router)
-app.include_router(integrations_router)
-app.include_router(admin_router)
+
+def include_domain_routers(application: FastAPI, *, api_prefix: str | None = None) -> None:
+    """Mount API routers; optional /api prefix so Traefik/proxies can forward /api/* unchanged."""
+    kw: dict = {"prefix": api_prefix} if api_prefix else {}
+    application.include_router(doc_intel_router, **kw)
+    application.include_router(workflow_router, **kw)
+    application.include_router(auth_router, **kw)
+    application.include_router(profile_router, **kw)
+    application.include_router(users_router, **kw)
+    application.include_router(integrations_router, **kw)
+    application.include_router(admin_router, **kw)
+
+
+# Bare paths (Next proxy strips /api before upstream) and /api/* (direct gateway / misconfigured path)
+include_domain_routers(app)
+include_domain_routers(app, api_prefix="/api")
 
 # Static mount for uploads (avatars, etc.)
 uploads_dir = os.path.join(os.getcwd(), "uploads")
 os.makedirs(uploads_dir, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+_uploads = StaticFiles(directory=uploads_dir)
+app.mount("/uploads", _uploads, name="uploads")
+app.mount("/api/uploads", StaticFiles(directory=uploads_dir), name="uploads_api_prefixed")
 
 
 # Simple request ID middleware for tracking
@@ -141,6 +151,8 @@ class HelloResponse(BaseModel):
 
 
 @app.get("/", response_model=HelloResponse)
+@app.get("/api", response_model=HelloResponse)
+@app.get("/api/", response_model=HelloResponse)
 async def root() -> HelloResponse:
     """Hello world endpoint with basic service metadata."""
     return HelloResponse(
@@ -163,6 +175,7 @@ async def health():
 
 
 @app.get("/health/swarms")
+@app.get("/api/health/swarms")
 async def health_swarms():
     """Check Swarms AI availability and version."""
     return {
@@ -175,6 +188,7 @@ async def health_swarms():
 
 
 @app.get("/agent/hello")
+@app.get("/api/agent/hello")
 async def agent_hello():
     """Invoke the single hello agent to return a Hello World message."""
     if not getattr(app.state, "swarms_ok", False):
