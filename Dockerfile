@@ -2,6 +2,9 @@
 # Build:  docker build -t invize-backend .
 # Run:    docker run --env-file .env -p 8000:8000 invize-backend
 #
+# XDG_CACHE_HOME=/app/.cache: prisma-python downloads the query engine here during `prisma generate`.
+# Without it, binaries land in /root/.cache and the non-root runtime user gets Permission denied.
+#
 # Required env at runtime: MONGO_URI, JWT_SECRET (see .env.example).
 # MongoDB must be a replica set for Prisma transactions (e.g. ?replicaSet=rs0).
 # For persistent uploads, mount a volume on /app/agent_workspace/uploads
@@ -11,7 +14,8 @@ FROM python:3.12-slim-bookworm
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PORT=8000
+    PORT=8000 \
+    XDG_CACHE_HOME=/app/.cache
 
 # OCR / PDF + OpenCV runtime libs + C++ toolchain (imagededup builds a Cython extension via g++)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -32,7 +36,9 @@ RUN pip install --upgrade pip && \
 
 COPY . .
 
-RUN prisma generate && \
+# Prisma engine binaries go under XDG_CACHE_HOME; must live under /app so non-root appuser can read them
+RUN mkdir -p /app/.cache && \
+    prisma generate && \
     mkdir -p agent_workspace/uploads agent_workspace/temp
 
 # Non-root (adjust UID if your volume mount requires it)
