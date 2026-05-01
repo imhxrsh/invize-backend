@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from agents.agent_output_validate import normalize_email_classification_dict
 from agents.llm_json_utils import json_loads_object_candidates
@@ -17,6 +18,79 @@ logger = logging.getLogger("invize-backend")
 VALID_CATEGORIES = frozenset(
     {"invoice", "receipt", "quote", "contract", "other", "unclear"}
 )
+
+# Skip Groq when the message is very unlikely to be financial (saves TPM on bulk scans).
+_FINANCE_HINT = re.compile(
+    r"\b(invoice|invoices|tax\s*invoice|e-?invoice|bill(ing)?|receipt|payment\s*due|"
+    r"amount\s*due|purchase\s*order|\bpo\b|p\.?\s*o\.?\s*#|quote|quotation|contract|"
+    r"proforma|remittance|accounts?\s*payable|vendor|supplier|gst|gstin|1099|"
+    r"wire\s*transfer|\bach\b|credit\s*note|debit\s*note)\b",
+    re.I,
+)
+_FINANCE_FILENAME = re.compile(
+    r"(invoice|inv[_\-]|bill|receipt|quote|purchase|payment|tax|gst|po[_\-]|credit|debit)",
+    re.I,
+)
+_DOC_MIME_PREFIXES = (
+    "application/pdf",
+    "image/",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument",
+)
+
+
+def _heuristic_classify_skip_llm(
+    *,
+    subject: str,
+    snippet: str,
+    attachments: List[Dict[str, str]],
+) -> Optional[Dict[str, Any]]:
+    """If we can confidently label as non-financial without an LLM, return a result dict; else None."""
+    if os.getenv("EMAIL_CLASSIFY_DISABLE_HEURISTIC", "").strip().lower() in ("1", "true", "yes"):
+        return None
+
+    att = attachments or []
+    peek = f"{subject}\n{snippet}"
+    if _FINANCE_HINT.search(peek):
+        return None
+
+    for a in att:
+        fn = a.get("filename") or ""
+        if _FINANCE_FILENAME.search(fn):
+            return None
+        mt = (a.get("mimeType") or "").lower()
+        if any(mt.startswith(p) for p in _DOC_MIME_PREFIXES):
+            return None
+
+    if not att:
+        return {
+            "category": "other",
+            "confidence": 1.0,
+            "reasons": ["Heuristic: no attachments and no financial keywords in subject or snippet"],
+            "heuristic": True,
+        }
+
+    low_only = True
+    for a in att:
+        fn_l = (a.get("filename") or "").lower()
+        mt = (a.get("mimeType") or "").lower()
+        is_cal = (
+            fn_l.endswith(".ics")
+            or "calendar" in mt
+            or mt in ("text/calendar", "application/ics", "application/x-ical")
+        )
+        if not is_cal:
+            low_only = False
+            break
+    if low_only:
+        return {
+            "category": "other",
+            "confidence": 1.0,
+            "reasons": ["Heuristic: only calendar-style attachments and no financial keywords"],
+            "heuristic": True,
+        }
+
+    return None
 
 
 def _cap_text(s: str, max_chars: int) -> str:
@@ -61,6 +135,12 @@ def classify_email_payload(
     if not swarms_ok:
         base["error"] = "swarms_unavailable"
         return base
+
+    early = _heuristic_classify_skip_llm(
+        subject=subject, snippet=snippet, attachments=attachments
+    )
+    if early is not None:
+        return {**base, **early}
 
     try:
         from swarms import Agent

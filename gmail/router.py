@@ -178,8 +178,21 @@ async def gmail_scanned(
     )
     total = await prisma.gmailscanresult.count(where=where)
 
+    uid = _prisma_user_id(user)
+    non_invoice_pipeline_skipped = await prisma.gmailscanresult.count(
+        where={
+            "userId": uid,
+            "pipelineStatus": "skipped",
+            "NOT": [{"category": "invoice"}],
+        }
+    )
+
     items = [_row_to_item(r) for r in rows]
-    return GmailScannedListResponse(items=items, total=total)
+    return GmailScannedListResponse(
+        items=items,
+        total=total,
+        non_invoice_pipeline_skipped=non_invoice_pipeline_skipped,
+    )
 
 
 @router.get("/scanned/{scan_id}", response_model=GmailScanDetailResponse)

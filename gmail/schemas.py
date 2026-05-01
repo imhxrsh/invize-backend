@@ -44,6 +44,8 @@ class GmailScanResultItem(BaseModel):
 class GmailScannedListResponse(BaseModel):
     items: List[GmailScanResultItem]
     total: int
+    # category != invoice and pipeline skipped
+    non_invoice_pipeline_skipped: int = 0
 
 
 class GmailScanDetailResponse(BaseModel):
