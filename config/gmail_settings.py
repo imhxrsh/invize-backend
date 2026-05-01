@@ -13,8 +13,9 @@ class GmailSettings(BaseSettings):
     GMAIL_OAUTH_FRONTEND_SUCCESS_URL: str = "http://localhost:3000/dashboard/settings?tab=integrations&gmail=connected"
     """Optional Fernet key (urlsafe base64). If empty, derived from JWT_SECRET."""
     GMAIL_TOKEN_FERNET_KEY: str = ""
-    GMAIL_SCAN_MAX_MESSAGES: int = 25
-    """How many messages to process before a long sleep (Groq TPM / quota)."""
+    """Max messages to fetch/classify per scan invocation (keeps Groq TPM under free-tier bursts)."""
+    GMAIL_SCAN_MAX_MESSAGES: int = 5
+    """Sub-batches within one scan; each chunk is followed by GMAIL_SCAN_BATCH_SLEEP_MS (if more remain)."""
     GMAIL_SCAN_BATCH_SIZE: int = 5
     """Pause between batches (ms), e.g. 120000 = 2 minutes."""
     GMAIL_SCAN_BATCH_SLEEP_MS: int = 120_000
