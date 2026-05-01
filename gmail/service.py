@@ -13,6 +13,7 @@ from typing import Any, List, Optional
 from config.auth_settings import AuthSettings
 from config.gmail_settings import GmailSettings
 from db.prisma import prisma
+from prisma import Json
 from gmail.attachments import (
     collect_fetchable_attachments,
     fetch_attachment_bytes,
@@ -178,7 +179,7 @@ async def _maybe_run_document_pipeline(
                     "gmailMessageId": gmail_message_id,
                 }
             },
-            data={"ingestLog": logs},
+            data={"ingestLog": Json(logs)},
         )
         return
 
@@ -191,7 +192,7 @@ async def _maybe_run_document_pipeline(
                 )
             ]
         )
-        data: dict = {"pipelineStatus": "skipped", "ingestLog": logs}
+        data: dict = {"pipelineStatus": "skipped", "ingestLog": Json(logs)}
         if row.pipelineStatus != "completed":
             data["documentJobId"] = None
             data["pipelineError"] = None
@@ -210,7 +211,7 @@ async def _maybe_run_document_pipeline(
     pick = pick_processable_attachment(candidates)
     if not pick:
         append_logs([_log_entry("warn", "Pipeline: skipped (no PDF/image attachment)")])
-        data = {"pipelineStatus": "skipped", "ingestLog": logs}
+        data = {"pipelineStatus": "skipped", "ingestLog": Json(logs)}
         if row.pipelineStatus != "completed":
             data["documentJobId"] = None
             data["pipelineError"] = None
@@ -243,7 +244,7 @@ async def _maybe_run_document_pipeline(
             data={
                 "pipelineStatus": "failed",
                 "pipelineError": str(e)[:500],
-                "ingestLog": logs,
+                "ingestLog": Json(logs),
             },
         )
         return
@@ -260,7 +261,7 @@ async def _maybe_run_document_pipeline(
             data={
                 "pipelineStatus": "failed",
                 "pipelineError": "attachment too large",
-                "ingestLog": logs,
+                "ingestLog": Json(logs),
             },
         )
         return
@@ -281,7 +282,7 @@ async def _maybe_run_document_pipeline(
             "documentJobId": job_id,
             "pipelineStatus": "processing",
             "pipelineError": None,
-            "ingestLog": logs,
+            "ingestLog": Json(logs),
         },
     )
 
@@ -315,7 +316,7 @@ async def _maybe_run_document_pipeline(
             data={
                 "pipelineStatus": "failed",
                 "pipelineError": str(e)[:500],
-                "ingestLog": logs,
+                "ingestLog": Json(logs),
             },
         )
         return
@@ -344,7 +345,7 @@ async def _maybe_run_document_pipeline(
             data={
                 "pipelineStatus": "failed",
                 "pipelineError": (err_msg or "processing did not complete")[:500],
-                "ingestLog": logs,
+                "ingestLog": Json(logs),
             },
         )
         return
@@ -360,7 +361,7 @@ async def _maybe_run_document_pipeline(
         data={
             "pipelineStatus": "completed",
             "pipelineError": None,
-            "ingestLog": logs,
+            "ingestLog": Json(logs),
         },
     )
 
@@ -471,19 +472,19 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
                     },
                     data={
                         "create": {
-                            "userId": user_id,
+                            "user": {"connect": {"id": user_id}},
                             "gmailMessageId": mid,
                             "threadId": thread_id,
                             "subject": subject or None,
                             "fromAddr": from_addr or None,
                             "snippet": snippet or None,
                             "bodyPreview": body or None,
-                            "attachmentMeta": attachments,
+                            "attachmentMeta": Json(attachments),
                             "category": category,
                             "confidence": conf,
-                            "reasons": reasons,
+                            "reasons": Json(reasons),
                             "rawAgentResult": (result.get("raw_agent_result") or None),
-                            "ingestLog": ingest_after_class,
+                            "ingestLog": Json(ingest_after_class),
                         },
                         "update": {
                             "threadId": thread_id,
@@ -491,13 +492,13 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
                             "fromAddr": from_addr or None,
                             "snippet": snippet or None,
                             "bodyPreview": body or None,
-                            "attachmentMeta": attachments,
+                            "attachmentMeta": Json(attachments),
                             "category": category,
                             "confidence": conf,
-                            "reasons": reasons,
+                            "reasons": Json(reasons),
                             "rawAgentResult": (result.get("raw_agent_result") or None),
                             "classifiedAt": now,
-                            "ingestLog": ingest_after_class,
+                            "ingestLog": Json(ingest_after_class),
                         },
                     },
                 )
