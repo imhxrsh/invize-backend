@@ -14,7 +14,14 @@ from config.gmail_settings import GmailSettings
 from db.prisma import prisma
 from gmail.crypto import decrypt_token, encrypt_token
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+# Must match what Google returns on token exchange. Web clients often get openid + userinfo
+# with gmail.readonly; if Flow scopes are narrower, oauthlib raises "Scope has changed".
+SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/gmail.readonly",
+]
 
 
 def _client_config(gs: GmailSettings) -> dict:
