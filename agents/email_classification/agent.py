@@ -70,18 +70,25 @@ def classify_email_payload(
         return base
 
     model_name = get_email_classification_model_name()
-    max_body = max(500, min(32000, int(os.getenv("EMAIL_CLASSIFY_MAX_BODY_CHARS", "4096"))))
-    max_snip = max(100, min(8000, int(os.getenv("EMAIL_CLASSIFY_MAX_SNIPPET_CHARS", "512"))))
-    max_subj = max(50, min(500, int(os.getenv("EMAIL_CLASSIFY_MAX_SUBJECT_CHARS", "240"))))
-    max_from = max(80, min(500, int(os.getenv("EMAIL_CLASSIFY_MAX_FROM_CHARS", "200"))))
-    max_att = max(1, min(40, int(os.getenv("EMAIL_CLASSIFY_MAX_ATTACHMENTS", "15"))))
+    # Groq free tier TPM treats (prompt + max_tokens) as the request budget; Swarms defaults
+    # max_tokens=4096, which alone can exceed 6000 with a modest prompt — cap completion hard.
+    max_completion = max(
+        64, min(1024, int(os.getenv("EMAIL_CLASSIFY_MAX_COMPLETION_TOKENS", "256")))
+    )
+    max_body = max(500, min(32000, int(os.getenv("EMAIL_CLASSIFY_MAX_BODY_CHARS", "2800"))))
+    max_snip = max(100, min(8000, int(os.getenv("EMAIL_CLASSIFY_MAX_SNIPPET_CHARS", "400"))))
+    max_subj = max(50, min(500, int(os.getenv("EMAIL_CLASSIFY_MAX_SUBJECT_CHARS", "200"))))
+    max_from = max(80, min(500, int(os.getenv("EMAIL_CLASSIFY_MAX_FROM_CHARS", "160"))))
+    max_att = max(1, min(40, int(os.getenv("EMAIL_CLASSIFY_MAX_ATTACHMENTS", "12"))))
     att_name_max = max(40, min(200, int(os.getenv("EMAIL_CLASSIFY_ATTACHMENT_NAME_MAX", "100"))))
+    classify_retries = max(0, min(5, int(os.getenv("EMAIL_CLASSIFY_RETRY_ATTEMPTS", "2"))))
 
+    cats = ",".join(sorted(VALID_CATEGORIES))
     system_prompt = (
-        "Email triage for AP. Input JSON: subject, from, date, snippet, body_text, attachments[]. "
-        f"category ∈ {{{', '.join(sorted(VALID_CATEGORIES))}}} (lowercase). "
-        "invoice=bill/tax invoice/due amount; receipt=paid; quote=estimate; contract=legal; other=not financial doc; unclear=ambiguous. "
-        "Weight attachment filenames (Invoice*.pdf). JSON only: "
+        f"AP email triage. JSON in: subject,from,date,snippet,body_text,attachments[]. "
+        f"category ∈ {{{cats}}} lowercase. "
+        "invoice=bill/due; receipt=paid; quote=estimate; contract=legal; other=non-financial; unclear=ambiguous. "
+        "Use attachment names (e.g. Invoice.pdf). Reply JSON only: "
         '{"category":"…","confidence":0.0,"reasons":["…"]}'
     )
 
@@ -91,6 +98,8 @@ def classify_email_payload(
         system_prompt=system_prompt,
         model_name=model_name,
         max_loops=1,
+        max_tokens=max_completion,
+        retry_attempts=classify_retries,
         output_type="str",
         dynamic_temperature_enabled=False,
     )
@@ -107,7 +116,8 @@ def classify_email_payload(
     }
     start = time.time()
     try:
-        raw = agent.run(task=f"Classify this email: {json.dumps(payload)}")
+        compact = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        raw = agent.run(task=f"Classify:{compact}")
         raw_str = str(raw).strip()
         duration = time.time() - start
         objs = json_loads_object_candidates(raw_str)
