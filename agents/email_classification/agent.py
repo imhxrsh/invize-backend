@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 from agents.agent_output_validate import normalize_email_classification_dict
 from agents.llm_json_utils import json_loads_object_candidates
+from agents.swarms_model_name import get_swarms_model_name
 
 logger = logging.getLogger("invize-backend")
 
@@ -46,7 +47,7 @@ def classify_email_payload(
         return base
 
     context_name = os.getenv("ANALYSIS_CONTEXT", "Context7")
-    model_name = os.getenv("AGENT_MODEL_NAME", "llama-3.3-70b-versatile")
+    model_name = get_swarms_model_name()
     system_prompt = (
         f"You are an email triage agent ({context_name}). "
         "Use subject, From, Date, snippet, body text, and attachment filenames (names matter: e.g. Invoice_2024.pdf). "

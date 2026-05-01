@@ -12,6 +12,7 @@ from .config import UPLOADS_DIR, TEMP_DIR
 from .models import DocumentStatus, DocumentType, ExtractedData, LineItem
 from .ocr import OCRProcessor
 from .extractor import FieldExtractor
+from agents.swarms_model_name import get_swarms_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +253,7 @@ class DocumentProcessor:
         )
 
         context_name = os.getenv("ANALYSIS_CONTEXT", "Context7")
-        model_name = os.getenv("AGENT_MODEL_NAME", "llama-3.3-70b-versatile")
+        model_name = get_swarms_model_name()
         system_prompt = (
             f"You are an invoice analysis agent ({context_name}). "
             "Input is JSON with extracted_data (pipeline fields: supplier, buyer, bill_to, amounts, dates, line_items, …) "

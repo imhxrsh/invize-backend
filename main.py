@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from agents.hello_agent import get_hello_agent
+from agents.swarms_model_name import get_swarms_model_name
 from agents.document_intelligence import router as doc_intel_router
 from agents.operations_workflow import workflow_router
 from auth.router import router as auth_router
@@ -209,7 +210,7 @@ async def agent_hello():
         return {
             "success": True,
             "message": str(result),
-            "model": os.getenv("AGENT_MODEL_NAME", "llama-3.3-70b-versatile"),
+            "model": get_swarms_model_name(),
             "swarms_version": getattr(app.state, "swarms_version", "unknown"),
             "execution_time": duration,
         }
