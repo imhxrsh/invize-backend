@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Any, List, Optional
@@ -43,6 +44,34 @@ def _merge_logs(existing: Any, entries: List[dict], max_len: int = 50) -> List[d
                 base.append(dict(x))
     base.extend(entries)
     return base[-max_len:]
+
+
+def _sanitize_confidence(raw: Any) -> Optional[float]:
+    if raw is None:
+        return None
+    try:
+        c = float(raw)
+        if math.isnan(c) or math.isinf(c):
+            return None
+        return c
+    except (TypeError, ValueError):
+        return None
+
+
+def _json_safe_reasons(raw: Any) -> List[Any]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        out: List[Any] = []
+        for x in raw:
+            if isinstance(x, (str, int, float, bool)):
+                out.append(x)
+            elif x is None:
+                continue
+            else:
+                out.append(str(x))
+        return out
+    return [str(raw)]
 
 
 async def save_connection_from_flow(
@@ -428,7 +457,8 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
                     f"Classified: {category} (confidence {result.get('confidence')})",
                 )
             )
-            reasons: Any = result.get("reasons") or []
+            reasons = _json_safe_reasons(result.get("reasons"))
+            conf = _sanitize_confidence(result.get("confidence"))
             ingest_after_class = _merge_logs(pre_logs, class_logs)
 
             try:
@@ -450,7 +480,7 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
                             "bodyPreview": body or None,
                             "attachmentMeta": attachments,
                             "category": category,
-                            "confidence": result.get("confidence"),
+                            "confidence": conf,
                             "reasons": reasons,
                             "rawAgentResult": (result.get("raw_agent_result") or None),
                             "ingestLog": ingest_after_class,
@@ -463,7 +493,7 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
                             "bodyPreview": body or None,
                             "attachmentMeta": attachments,
                             "category": category,
-                            "confidence": result.get("confidence"),
+                            "confidence": conf,
                             "reasons": reasons,
                             "rawAgentResult": (result.get("raw_agent_result") or None),
                             "classifiedAt": now,
@@ -471,8 +501,14 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
                         },
                     },
                 )
-            except Exception as e:
-                logger.warning("Gmail scan: upsert %s: %s", mid, e)
+                logger.info(
+                    "Gmail scan: persisted row user=%s msg=%s category=%s",
+                    user_id,
+                    mid[:24],
+                    category,
+                )
+            except Exception:
+                logger.exception("Gmail scan: upsert failed msg=%s user=%s", mid[:24], user_id)
                 continue
 
             if label_id:

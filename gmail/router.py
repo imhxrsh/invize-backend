@@ -37,6 +37,11 @@ logger = logging.getLogger("invize-backend")
 router = APIRouter(prefix="/gmail", tags=["Gmail"])
 
 
+def _prisma_user_id(user) -> str:
+    """Use the same string id for all Gmail-related Prisma filters (must match scan + list)."""
+    return str(user.id)
+
+
 def _gs() -> GmailSettings:
     return GmailSettings()
 
@@ -80,7 +85,7 @@ def _row_to_item(r: Any) -> GmailScanResultItem:
 
 @router.get("/status", response_model=GmailStatusResponse)
 async def gmail_status(user=Depends(get_current_user)):
-    s = await get_status(user.id)
+    s = await get_status(_prisma_user_id(user))
     return GmailStatusResponse(
         connected=s["connected"],
         google_email=s.get("google_email"),
@@ -93,7 +98,7 @@ async def gmail_oauth_start(user=Depends(get_current_user)):
     gs = _gs()
     _require_gmail_config(gs)
     auth = AuthSettings()
-    state = create_gmail_oauth_state(user.id, auth)
+    state = create_gmail_oauth_state(_prisma_user_id(user), auth)
     flow = flow_from_settings(gs)
     authorization_url, _ = flow.authorization_url(
         access_type="offline",
@@ -138,18 +143,19 @@ async def gmail_oauth_callback(request: Request):
 
 @router.post("/disconnect", response_model=GmailDisconnectResponse)
 async def gmail_disconnect(user=Depends(get_current_user)):
-    ok = await disconnect_gmail(user.id)
+    ok = await disconnect_gmail(_prisma_user_id(user))
     return GmailDisconnectResponse(disconnected=ok)
 
 
 @router.post("/scan", response_model=GmailScanQueuedResponse)
 async def gmail_scan(request: Request, background_tasks: BackgroundTasks, user=Depends(get_current_user)):
-    conn = await prisma.gmailconnection.find_unique(where={"userId": user.id})
+    uid = _prisma_user_id(user)
+    conn = await prisma.gmailconnection.find_unique(where={"userId": uid})
     if not conn:
         raise HTTPException(status_code=400, detail="Gmail not connected")
 
     swarms_ok = bool(getattr(request.app.state, "swarms_ok", False))
-    background_tasks.add_task(schedule_scan_background, str(user.id), swarms_ok)
+    background_tasks.add_task(schedule_scan_background, uid, swarms_ok)
     return GmailScanQueuedResponse(queued=True, message="Scan started in background.")
 
 
@@ -160,7 +166,7 @@ async def gmail_scanned(
     skip: int = 0,
     category: Optional[str] = None,
 ):
-    where: dict = {"userId": user.id}
+    where: dict = {"userId": _prisma_user_id(user)}
     if category:
         where["category"] = category
 
@@ -178,7 +184,7 @@ async def gmail_scanned(
 
 @router.get("/scanned/{scan_id}", response_model=GmailScanDetailResponse)
 async def gmail_scanned_one(scan_id: str, user=Depends(get_current_user)):
-    row = await get_scan_row(user.id, scan_id)
+    row = await get_scan_row(_prisma_user_id(user), scan_id)
     if not row:
         raise HTTPException(status_code=404, detail="Scan result not found")
     return GmailScanDetailResponse(item=_row_to_item(row))
