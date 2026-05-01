@@ -16,6 +16,8 @@ class GmailSettings(BaseSettings):
     """Comma-separated categories that trigger document pipeline (invoice attachment → OCR path)."""
     GMAIL_PIPELINE_CATEGORIES: str = "invoice,receipt"
     GMAIL_PIPELINE_MAX_ATTACHMENT_MB: int = 50
+    """Pause between messages (ms) after classify/pipeline to spread Groq TPM; 0 disables."""
+    GMAIL_SCAN_LLM_DELAY_MS: int = 1500
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 

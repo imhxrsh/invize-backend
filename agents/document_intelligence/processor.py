@@ -16,6 +16,8 @@ from agents.swarms_model_name import get_swarms_model_name
 
 logger = logging.getLogger(__name__)
 
+_PROGRESS_HISTORY_CAP = 100
+
 
 class DocumentProcessor:
     """Main document processing orchestrator"""
@@ -162,6 +164,14 @@ class DocumentProcessor:
             status_data["status"] = status.value if hasattr(status, 'value') else str(status)
             if progress:
                 status_data["progress"] = progress
+                hist = status_data.get("progress_history")
+                if not isinstance(hist, list):
+                    hist = []
+                if not hist or hist[-1] != progress:
+                    hist.append(progress)
+                if len(hist) > _PROGRESS_HISTORY_CAP:
+                    hist = hist[-_PROGRESS_HISTORY_CAP:]
+                status_data["progress_history"] = hist
             
             # Write back
             with open(status_file, "w") as f:

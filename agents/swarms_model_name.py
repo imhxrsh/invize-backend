@@ -19,3 +19,23 @@ def get_swarms_model_name() -> str:
     if os.getenv("GROQ_API_KEY"):
         return f"groq/{raw}"
     return raw
+
+
+def get_email_classification_model_name() -> str:
+    """
+    Gmail scan classifies many messages in a row; use a smaller Groq model by default
+    to cut prompt tokens and stay under TPM (70B bursts hit limits fast).
+    """
+    default = "groq/llama-3.1-8b-instant"
+    raw = (
+        os.getenv("EMAIL_CLASSIFICATION_MODEL")
+        or os.getenv("GMAIL_CLASSIFIER_MODEL")
+        or ""
+    ).strip()
+    if not raw:
+        return default
+    if "/" in raw:
+        return raw
+    if os.getenv("GROQ_API_KEY"):
+        return f"groq/{raw}"
+    return raw

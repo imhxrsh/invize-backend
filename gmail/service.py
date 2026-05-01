@@ -355,8 +355,11 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
 
     mids = [m["id"] for m in resp.get("messages") or []]
     now = datetime.now(timezone.utc)
+    delay_s = max(0.0, min(60.0, gs.GMAIL_SCAN_LLM_DELAY_MS / 1000.0))
 
-    for mid in mids:
+    for idx, mid in enumerate(mids):
+        if idx > 0 and delay_s > 0:
+            await asyncio.sleep(delay_s)
         existing = await prisma.gmailscanresult.find_unique(
             where={"userId_gmailMessageId": {"userId": user_id, "gmailMessageId": mid}}
         )

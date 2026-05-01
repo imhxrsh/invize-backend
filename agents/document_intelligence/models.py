@@ -82,6 +82,7 @@ class DocumentStatusResponse(BaseModel):
     job_id: str
     status: DocumentStatus
     progress: Optional[str] = None
+    progress_history: Optional[List[str]] = None
     error: Optional[str] = None
 
 

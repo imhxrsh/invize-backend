@@ -10,13 +10,36 @@ from typing import Any, Dict, List
 
 from agents.agent_output_validate import normalize_email_classification_dict
 from agents.llm_json_utils import json_loads_object_candidates
-from agents.swarms_model_name import get_swarms_model_name
+from agents.swarms_model_name import get_email_classification_model_name
 
 logger = logging.getLogger("invize-backend")
 
 VALID_CATEGORIES = frozenset(
     {"invoice", "receipt", "quote", "contract", "other", "unclear"}
 )
+
+
+def _cap_text(s: str, max_chars: int) -> str:
+    if max_chars <= 0 or len(s) <= max_chars:
+        return s
+    return s[: max_chars - 1] + "…"
+
+
+def _shrink_attachments(
+    attachments: List[Dict[str, str]],
+    *,
+    max_items: int,
+    name_max: int,
+) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    for a in (attachments or [])[:max_items]:
+        out.append(
+            {
+                "filename": _cap_text(a.get("filename") or "", name_max),
+                "mimeType": _cap_text(a.get("mimeType") or "", 80),
+            }
+        )
+    return out
 
 
 def classify_email_payload(
@@ -46,24 +69,19 @@ def classify_email_payload(
         base["error"] = "swarms_import_failed"
         return base
 
-    context_name = os.getenv("ANALYSIS_CONTEXT", "Context7")
-    model_name = get_swarms_model_name()
+    model_name = get_email_classification_model_name()
+    max_body = max(500, min(32000, int(os.getenv("EMAIL_CLASSIFY_MAX_BODY_CHARS", "4096"))))
+    max_snip = max(100, min(8000, int(os.getenv("EMAIL_CLASSIFY_MAX_SNIPPET_CHARS", "512"))))
+    max_subj = max(50, min(500, int(os.getenv("EMAIL_CLASSIFY_MAX_SUBJECT_CHARS", "240"))))
+    max_from = max(80, min(500, int(os.getenv("EMAIL_CLASSIFY_MAX_FROM_CHARS", "200"))))
+    max_att = max(1, min(40, int(os.getenv("EMAIL_CLASSIFY_MAX_ATTACHMENTS", "15"))))
+    att_name_max = max(40, min(200, int(os.getenv("EMAIL_CLASSIFY_ATTACHMENT_NAME_MAX", "100"))))
+
     system_prompt = (
-        f"You are an email triage agent ({context_name}). "
-        "Use subject, From, Date, snippet, body text, and attachment filenames (names matter: e.g. Invoice_2024.pdf). "
-        f"category must be exactly one lowercase token from: {', '.join(sorted(VALID_CATEGORIES))}. "
-        "Definitions: "
-        "invoice = tax invoice, bill, statement with amount due, payment request, remittance advice that is still a bill. "
-        "receipt = paid confirmation, payment succeeded, thank you for your payment. "
-        "quote = estimate, proposal, quotation, RFQ response. "
-        "contract = agreement, MSA, SOW, legal terms. "
-        "other = newsletters, marketing, internal chatter, OTPs, meeting invites, anything non-financial-document. "
-        "unclear = genuinely ambiguous (do not use unclear if attachment name strongly suggests invoice). "
-        "Rules: prefer invoice when PDF/image names contain invoice|bill|tax|remit|statement and body/snippet references amounts or due dates. "
-        "Prefer other for no-attachment marketing or noreply newsletters even if subject says 'Invoice' as clickbait—use reasons to explain. "
-        "confidence: 0.0–1.0 calibrated (high only when evidence is explicit). "
-        "reasons: 1–6 short strings; include sender domain or company when it supports the label. "
-        "Output ONLY valid JSON, no markdown fences, no keys besides category, confidence, reasons: "
+        "Email triage for AP. Input JSON: subject, from, date, snippet, body_text, attachments[]. "
+        f"category ∈ {{{', '.join(sorted(VALID_CATEGORIES))}}} (lowercase). "
+        "invoice=bill/tax invoice/due amount; receipt=paid; quote=estimate; contract=legal; other=not financial doc; unclear=ambiguous. "
+        "Weight attachment filenames (Invoice*.pdf). JSON only: "
         '{"category":"…","confidence":0.0,"reasons":["…"]}'
     )
 
@@ -78,12 +96,14 @@ def classify_email_payload(
     )
 
     payload = {
-        "subject": subject,
-        "from": from_addr,
-        "date": date,
-        "snippet": snippet,
-        "body_text": body_text,
-        "attachments": attachments,
+        "subject": _cap_text(subject, max_subj),
+        "from": _cap_text(from_addr, max_from),
+        "date": _cap_text(date, 80),
+        "snippet": _cap_text(snippet, max_snip),
+        "body_text": _cap_text(body_text, max_body),
+        "attachments": _shrink_attachments(
+            attachments, max_items=max_att, name_max=att_name_max
+        ),
     }
     start = time.time()
     try:

@@ -271,10 +271,18 @@ async def get_document_status(job_id: str, _user=Depends(get_current_user)):
         with open(status_file, "r") as f:
             status_data = json.load(f)
         
+        raw_hist = status_data.get("progress_history")
+        progress_history = (
+            raw_hist if isinstance(raw_hist, list) else None
+        )
+        if progress_history is not None:
+            progress_history = [str(x) for x in progress_history if x is not None]
+
         return DocumentStatusResponse(
             job_id=job_id,
             status=status_data.get("status", DocumentStatus.PENDING),
             progress=status_data.get("progress"),
+            progress_history=progress_history,
             error=status_data.get("error")
         )
         
