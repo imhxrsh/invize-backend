@@ -20,6 +20,7 @@ from gmail.attachments import (
 )
 from gmail.client import credentials_for_user
 from gmail.crypto import encrypt_token
+from gmail.labels import add_label_to_message, ensure_ingest_label_id
 from gmail.parse import extract_from_message
 from agents.email_classification import classify_email_payload
 
@@ -345,9 +346,28 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
         return
 
     max_n = max(1, min(100, gs.GMAIL_SCAN_MAX_MESSAGES))
+    batch_size = max(1, min(max_n, gs.GMAIL_SCAN_BATCH_SIZE))
+    batch_sleep_s = max(0.0, min(900.0, gs.GMAIL_SCAN_BATCH_SLEEP_MS / 1000.0))
+    after = (gs.GMAIL_SCAN_AFTER_DATE or "2026/04/30").strip()
+    label_name = (gs.GMAIL_INGEST_LABEL_NAME or "Invize/Ingested").strip()
+    # Inbox only, on/after cutoff, exclude threads already marked ingested by this backend.
+    safe_lbl = label_name.replace('"', "").strip()
+    q = f'in:inbox after:{after} -label:"{safe_lbl}"'
+
+    label_id = await asyncio.to_thread(ensure_ingest_label_id, service, label_name)
+    if not label_id:
+        logger.warning(
+            "Gmail scan: could not resolve ingest label %r — scans continue but threads won't be marked ingested. "
+            "Reconnect Gmail if the account lacks gmail.modify consent.",
+            label_name,
+        )
+
     try:
         resp = await asyncio.to_thread(
-            lambda: service.users().messages().list(userId="me", maxResults=max_n).execute()
+            lambda: service.users()
+            .messages()
+            .list(userId="me", maxResults=max_n, q=q)
+            .execute()
         )
     except Exception as e:
         logger.exception("Gmail scan: list failed: %s", e)
@@ -355,106 +375,129 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
 
     mids = [m["id"] for m in resp.get("messages") or []]
     now = datetime.now(timezone.utc)
-    delay_s = max(0.0, min(60.0, gs.GMAIL_SCAN_LLM_DELAY_MS / 1000.0))
+    delay_s = max(0.0, min(120.0, gs.GMAIL_SCAN_LLM_DELAY_MS / 1000.0))
 
-    for idx, mid in enumerate(mids):
-        if idx > 0 and delay_s > 0:
-            await asyncio.sleep(delay_s)
-        existing = await prisma.gmailscanresult.find_unique(
-            where={"userId_gmailMessageId": {"userId": user_id, "gmailMessageId": mid}}
-        )
-        pre_logs = existing.ingestLog if existing else None
+    for batch_start in range(0, len(mids), batch_size):
+        batch = mids[batch_start : batch_start + batch_size]
+        for idx, mid in enumerate(batch):
+            if idx > 0 and delay_s > 0:
+                await asyncio.sleep(delay_s)
 
-        try:
-            msg = await asyncio.to_thread(
-                lambda m=mid: service.users().messages().get(userId="me", id=m, format="full").execute()
+            existing = await prisma.gmailscanresult.find_unique(
+                where={"userId_gmailMessageId": {"userId": user_id, "gmailMessageId": mid}}
             )
-        except Exception as e:
-            logger.warning("Gmail scan: get message %s: %s", mid, e)
-            continue
+            if gs.GMAIL_SKIP_IF_ALREADY_INGESTED and existing:
+                if label_id:
+                    await asyncio.to_thread(add_label_to_message, service, mid, label_id)
+                continue
 
-        subject, from_addr, date, snippet, body, attachments = extract_from_message(msg)
-        thread_id = msg.get("threadId")
+            pre_logs = existing.ingestLog if existing else None
 
-        class_logs = [
-            _log_entry("info", f"Message {mid[:16]}… fetched"),
-        ]
-        result = await asyncio.to_thread(
-            lambda: classify_email_payload(
-                subject=subject,
-                from_addr=from_addr,
-                date=date,
-                snippet=snippet,
-                body_text=body,
-                attachments=attachments,
-                swarms_ok=swarms_ok,
+            try:
+                msg = await asyncio.to_thread(
+                    lambda m=mid: service.users()
+                    .messages()
+                    .get(userId="me", id=m, format="full")
+                    .execute()
+                )
+            except Exception as e:
+                logger.warning("Gmail scan: get message %s: %s", mid, e)
+                continue
+
+            subject, from_addr, date, snippet, body, attachments = extract_from_message(msg)
+            thread_id = msg.get("threadId")
+
+            class_logs = [
+                _log_entry("info", f"Message {mid[:16]}… fetched"),
+            ]
+            result = await asyncio.to_thread(
+                lambda s=subject, f=from_addr, d=date, sn=snippet, b=body, att=attachments: classify_email_payload(
+                    subject=s,
+                    from_addr=f,
+                    date=d,
+                    snippet=sn,
+                    body_text=b,
+                    attachments=att,
+                    swarms_ok=swarms_ok,
+                )
             )
-        )
-        category = str(result.get("category") or "unclear")
-        class_logs.append(
-            _log_entry(
-                "info",
-                f"Classified: {category} (confidence {result.get('confidence')})",
+            category = str(result.get("category") or "unclear")
+            class_logs.append(
+                _log_entry(
+                    "info",
+                    f"Classified: {category} (confidence {result.get('confidence')})",
+                )
             )
-        )
-        reasons: Any = result.get("reasons") or []
-        ingest_after_class = _merge_logs(pre_logs, class_logs)
+            reasons: Any = result.get("reasons") or []
+            ingest_after_class = _merge_logs(pre_logs, class_logs)
 
-        try:
-            await prisma.gmailscanresult.upsert(
-                where={
-                    "userId_gmailMessageId": {
-                        "userId": user_id,
-                        "gmailMessageId": mid,
-                    }
-                },
-                data={
-                    "create": {
-                        "userId": user_id,
-                        "gmailMessageId": mid,
-                        "threadId": thread_id,
-                        "subject": subject or None,
-                        "fromAddr": from_addr or None,
-                        "snippet": snippet or None,
-                        "bodyPreview": body or None,
-                        "attachmentMeta": attachments,
-                        "category": category,
-                        "confidence": result.get("confidence"),
-                        "reasons": reasons,
-                        "rawAgentResult": (result.get("raw_agent_result") or None),
-                        "ingestLog": ingest_after_class,
+            try:
+                await prisma.gmailscanresult.upsert(
+                    where={
+                        "userId_gmailMessageId": {
+                            "userId": user_id,
+                            "gmailMessageId": mid,
+                        }
                     },
-                    "update": {
-                        "threadId": thread_id,
-                        "subject": subject or None,
-                        "fromAddr": from_addr or None,
-                        "snippet": snippet or None,
-                        "bodyPreview": body or None,
-                        "attachmentMeta": attachments,
-                        "category": category,
-                        "confidence": result.get("confidence"),
-                        "reasons": reasons,
-                        "rawAgentResult": (result.get("raw_agent_result") or None),
-                        "classifiedAt": now,
-                        "ingestLog": ingest_after_class,
+                    data={
+                        "create": {
+                            "userId": user_id,
+                            "gmailMessageId": mid,
+                            "threadId": thread_id,
+                            "subject": subject or None,
+                            "fromAddr": from_addr or None,
+                            "snippet": snippet or None,
+                            "bodyPreview": body or None,
+                            "attachmentMeta": attachments,
+                            "category": category,
+                            "confidence": result.get("confidence"),
+                            "reasons": reasons,
+                            "rawAgentResult": (result.get("raw_agent_result") or None),
+                            "ingestLog": ingest_after_class,
+                        },
+                        "update": {
+                            "threadId": thread_id,
+                            "subject": subject or None,
+                            "fromAddr": from_addr or None,
+                            "snippet": snippet or None,
+                            "bodyPreview": body or None,
+                            "attachmentMeta": attachments,
+                            "category": category,
+                            "confidence": result.get("confidence"),
+                            "reasons": reasons,
+                            "rawAgentResult": (result.get("raw_agent_result") or None),
+                            "classifiedAt": now,
+                            "ingestLog": ingest_after_class,
+                        },
                     },
-                },
-            )
-        except Exception as e:
-            logger.warning("Gmail scan: upsert %s: %s", mid, e)
-            continue
+                )
+            except Exception as e:
+                logger.warning("Gmail scan: upsert %s: %s", mid, e)
+                continue
 
-        try:
-            await _maybe_run_document_pipeline(
-                user_id=user_id,
-                gmail_message_id=mid,
-                msg=msg,
-                service=service,
-                category=category.lower().strip(),
-                gs=gs,
+            if label_id:
+                await asyncio.to_thread(add_label_to_message, service, mid, label_id)
+
+            try:
+                await _maybe_run_document_pipeline(
+                    user_id=user_id,
+                    gmail_message_id=mid,
+                    msg=msg,
+                    service=service,
+                    category=category.lower().strip(),
+                    gs=gs,
+                )
+            except Exception as e:
+                logger.exception("Gmail pipeline branch failed for %s: %s", mid, e)
+
+        if batch_start + batch_size < len(mids) and batch_sleep_s > 0:
+            logger.info(
+                "Gmail scan: batch pause %ss (%s/%s messages remaining in this run)",
+                batch_sleep_s,
+                len(mids) - batch_start - batch_size,
+                len(mids),
             )
-        except Exception as e:
-            logger.exception("Gmail pipeline branch failed for %s: %s", mid, e)
+            await asyncio.sleep(batch_sleep_s)
 
     try:
         await prisma.gmailconnection.update(

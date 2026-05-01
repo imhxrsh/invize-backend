@@ -20,7 +20,8 @@ SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
-    "https://www.googleapis.com/auth/gmail.readonly",
+    # gmail.modify: backend applies an ingest-marker label (not toggling user read/unread).
+    "https://www.googleapis.com/auth/gmail.modify",
 ]
 
 

@@ -1,4 +1,5 @@
 import os
+import asyncio
 import time
 import uuid
 import importlib
@@ -23,6 +24,7 @@ from agents.payments import payments_router
 from db.prisma import prisma
 from db.mongo import ensure_ttl_indexes
 from dotenv import load_dotenv
+from config.gmail_settings import GmailSettings
 
 # Load environment variables early
 load_dotenv()
@@ -69,7 +71,32 @@ async def lifespan(app: FastAPI):
         app.state.db_ready = False
         logger.exception("Database initialization failed: %s", e)
 
+    gmail_scan_task: asyncio.Task | None = None
+    try:
+        _gmail_settings = GmailSettings()
+        if _gmail_settings.GMAIL_AUTO_SCAN_INTERVAL_SECONDS > 0:
+            from gmail.scheduler import gmail_periodic_scan_worker
+
+            gmail_scan_task = asyncio.create_task(gmail_periodic_scan_worker(app))
+            app.state.gmail_scan_task = gmail_scan_task
+            logger.info(
+                "Gmail auto-scan enabled (every %s seconds after %ss startup delay)",
+                _gmail_settings.GMAIL_AUTO_SCAN_INTERVAL_SECONDS,
+                _gmail_settings.GMAIL_AUTO_SCAN_STARTUP_DELAY_SECONDS,
+            )
+    except Exception as e:
+        logger.warning("Gmail auto-scan not started: %s", e)
+
     yield
+
+    if gmail_scan_task is not None:
+        gmail_scan_task.cancel()
+        try:
+            await gmail_scan_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
 
     # Shutdown: cleanup (nothing persistent yet)
     try:
