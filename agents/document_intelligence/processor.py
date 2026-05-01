@@ -235,7 +235,7 @@ class DocumentProcessor:
         return validated
 
     def _analyze_with_swarms(self, extracted: Dict[str, Any], additional: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Pass extracted data to a Swarms agent for analysis using Context7."""
+        """Pass extracted data to a Swarms agent; return validated JSON in result (never trust raw model text)."""
         try:
             from swarms import Agent
         except Exception as e:
@@ -243,13 +243,30 @@ class DocumentProcessor:
             return None
 
         import os, json, time
+
+        from agents.agent_output_validate import (
+            invoice_analysis_retry_task,
+            merge_invoice_analysis_with_extracted,
+            normalize_invoice_analysis_swarms,
+            should_retry_swarms_json,
+        )
+
         context_name = os.getenv("ANALYSIS_CONTEXT", "Context7")
-        model_name = os.getenv("AGENT_MODEL_NAME", "openai/gpt-oss-20b")
+        model_name = os.getenv("AGENT_MODEL_NAME", "llama-3.3-70b-versatile")
         system_prompt = (
-            f"You are an invoice analysis agent operating under {context_name}. "
-            "Analyze the provided invoice JSON for completeness, anomalies, currency correctness, "
-            "tax validation, PO matching hints, and summarize key fields and any issues. "
-            "Respond with a concise JSON: {summary, flags[], recommendations[]}."
+            f"You are an invoice analysis agent ({context_name}). "
+            "Input is JSON with extracted_data (pipeline fields: supplier, buyer, bill_to, amounts, dates, line_items, …) "
+            "and optional additional_fields. "
+            "You must only infer supplier_guess and buyer_guess from that payload—never invent names or numbers not grounded in it. "
+            "If unsure, use null for guesses and say so in summary. "
+            "Tasks: (1) supplier_guess = issuer of the tax invoice; buyer_guess = bill-to/customer. "
+            "(2) Flag swapped supplier/buyer, missing vendor, or totals that do not reconcile (subtotal + tax vs total). "
+            "(3) Note missing invoice_number, due_date, currency mismatch, or PO when visible in payload. "
+            "(4) recommendations: max 8 actionable AP checks; flags: max 8 short issues. "
+            "summary: 2–4 neutral sentences. "
+            "Output one JSON object only—no markdown fences, no extra keys. "
+            "Keys exactly: summary (string), supplier_guess (string|null), buyer_guess (string|null), "
+            "flags (string[]), recommendations (string[])."
         )
 
         agent = Agent(
@@ -268,13 +285,35 @@ class DocumentProcessor:
         }
         start = time.time()
         try:
-            result = agent.run(task=f"Analyze this invoice: {json.dumps(payload)}")
+            result = agent.run(
+                task=(
+                    "Return one JSON object with the exact keys in your system instructions. "
+                    "Do not include markdown code fences. "
+                    f"Payload: {json.dumps(payload)}"
+                )
+            )
+            raw_text = str(result).strip()
+            normalized = normalize_invoice_analysis_swarms(raw_text)
+            if not normalized.get("_meta", {}).get("parse_ok") and should_retry_swarms_json():
+                try:
+                    result2 = agent.run(
+                        task=invoice_analysis_retry_task() + " Payload: " + json.dumps(payload)
+                    )
+                    normalized = normalize_invoice_analysis_swarms(str(result2).strip())
+                except Exception as re:
+                    logger.warning("Invoice analysis JSON retry failed: %s", re)
+            normalized = merge_invoice_analysis_with_extracted(
+                normalized,
+                extracted.get("supplier") if isinstance(extracted, dict) else None,
+                extracted.get("buyer") if isinstance(extracted, dict) else None,
+            )
             duration = time.time() - start
             return {
                 "context": context_name,
                 "model": model_name,
-                "result": str(result),
+                "result": json.dumps(normalized, ensure_ascii=False),
                 "execution_time": duration,
+                "parse_ok": bool(normalized.get("_meta", {}).get("parse_ok")),
             }
         except Exception as e:
             logger.warning(f"Agent analysis failed: {e}")

@@ -1,0 +1,169 @@
+%% Invize System Flows - Current + Future State
+%% Render each block independently in Mermaid-compatible viewers.
+
+%% -------------------------------------------------------------------
+%% DIAGRAM 1: End-to-End Request, Auth, and Data Access (Improved)
+%% -------------------------------------------------------------------
+flowchart LR
+    U[👤 User] --> FE[🖥️ Next.js UI\nDashboard, Invoices, Queue, Payments, Admin]
+    FE --> MW[🛡️ Next Middleware\nRoute guard + token cookie checks]
+    MW -->|valid session| GW[🔀 API Gateway\napp/api/[[...path]] proxy]
+    MW -->|missing token| L[🔐 Login/Register page]
+
+    L --> AUTH1[🔑 Auth API\n/login /register /refresh /logout]
+    AUTH1 --> TOK[🎟️ JWT + Refresh Rotation]
+    TOK --> MW
+
+    GW --> RID[🧾 FastAPI Request-ID Middleware]
+    RID --> RT[⚙️ Domain Routers\nAuth Users Integrations Docs Workflow Payments Admin]
+
+    RT --> DB[(🗄️ Prisma + Mongo Models)]
+    RT --> FS[(📁 Job status/result files)]
+    RT --> AI[🤖 AI Services\nExtraction + Suggestions]
+    RT --> ERP[🏢 ERP Adapter Layer\nDemo/REST/Stub]
+
+    DB --> RT
+    FS --> RT
+    AI --> RT
+    ERP --> RT
+    RT --> GW --> FE --> U
+
+%% -------------------------------------------------------------------
+%% DIAGRAM 2: Invoice Intelligence Pipeline + Operational Decisions
+%% -------------------------------------------------------------------
+flowchart TD
+    A[📄 Analyst uploads invoice] --> B[✅ File validation\nsize/type]
+    B --> C[🧵 Create job + persist initial status]
+    C --> D[⏳ Background task started]
+
+    D --> E[🔍 OCR stage]
+    E --> F[🧠 Field extraction + normalization]
+    F --> G[🛡️ Verification/Compliance\nDuplicate + Authenticity + Audit]
+    G --> H[🔗 ERP matching\nPO/GRN/vendor checks]
+
+    H --> I{⚠️ Exception classified?}
+    I -- Yes --> J[📥 Create review queue item]
+    I -- No --> K[✅ Mark ready for approval]
+
+    J --> J1[👩‍💼 Ops triage queue]
+    J1 --> J2[📝 Add notes and resolve]
+    J2 --> L{Decision}
+
+    K --> L
+    L -- Approve --> M[👍 Update approval summary]
+    L -- Reject --> N[❌ Update rejection summary]
+
+    M --> O[💳 Payment readiness engine]
+    N --> P[🔁 Return to correction/reprocess path]
+    O --> Q[🧾 Batch creation + line items]
+    Q --> R[🚀 Batch submission]
+    R --> S[🏦 Treasury stub / payout processor]
+    S --> T[(🗄️ Batch + settlement states)]
+
+%% -------------------------------------------------------------------
+%% DIAGRAM 3: Admin, Governance, Security, and Audit Control Plane
+%% -------------------------------------------------------------------
+flowchart TB
+    AD[🧑‍💼 Admin] --> UI[⚙️ Admin + Settings UI]
+
+    UI --> UMG[👥 User Management\ninvite, activate/deactivate, role updates]
+    UI --> SEC[🛡️ Security Controls\nsession policy, token policy]
+    UI --> INT[🔌 Integrations Control\nerp_type and external configs]
+    UI --> AUD[📜 Audit Views\nsecurity events + action trails]
+    UI --> SYS[📈 System Health/Stats]
+
+    UMG --> APIA[⚙️ Administration Router]
+    SEC --> APIA
+    INT --> APII[⚙️ Integrations Router]
+    AUD --> APIA
+    SYS --> APIA
+
+    APIA --> DBA[(🗄️ User/Session/Audit models)]
+    APII --> DBC[(🗄️ IntegrationConfig)]
+
+    DBA --> ENF[🔐 Runtime Enforcement\nAuth dependency checks]
+    DBC --> MAT[🔗 Matching processor ERP selection]
+
+    ENF --> APP[🖥️ Protected App Flows]
+    MAT --> PIPE[📄 Document processing pipeline]
+
+%% -------------------------------------------------------------------
+%% DIAGRAM 4 (Future): Edge AI Processing + Cloud Orchestration
+%% -------------------------------------------------------------------
+flowchart LR
+    CAM[📷 Scanner/Mobile Capture] --> EDGEIN[🧩 Edge Ingestion SDK]
+    EDGEIN --> PRE[⚡ On-device preprocess\ncrop, denoise, redact]
+    PRE --> EOCR[🧠 Edge OCR + lightweight extraction]
+
+    EOCR --> DEC{🌐 Connectivity available?}
+    DEC -- No --> CACHE[(💾 Encrypted edge queue)]
+    CACHE --> SYNC[🔄 Deferred sync agent]
+    DEC -- Yes --> SYNC
+
+    SYNC --> APIE[☁️ Cloud API ingress]
+    APIE --> ORCH[⚙️ Cloud orchestrator]
+    ORCH --> HEAVY[🤖 Heavy AI models\nvalidation, anomaly, risk]
+    ORCH --> ERPF[🏢 ERP/finance integrations]
+    ORCH --> WF[📋 Workflow + approval engine]
+
+    HEAVY --> FB[📬 Model feedback package]
+    WF --> FB
+    FB --> EDGEUPD[📦 Edge model/rule update service]
+    EDGEUPD --> EDGEIN
+
+%% -------------------------------------------------------------------
+%% DIAGRAM 5 (Future): Event-Driven Architecture + Multi-Agent Layer
+%% -------------------------------------------------------------------
+flowchart TD
+    UI2[👤 User Actions\nupload, approve, resolve, batch submit] --> CMD[🛎️ Command API]
+    CMD --> EVT[📡 Event Bus\nKafka/SNS/SQS or equivalent]
+
+    EVT --> AG1[🤖 Agent: Extraction]
+    EVT --> AG2[🤖 Agent: Compliance]
+    EVT --> AG3[🤖 Agent: Matching]
+    EVT --> AG4[🤖 Agent: Payment Optimization]
+    EVT --> AG5[🤖 Agent: Fraud/Anomaly]
+
+    AG1 --> ST1[(🗃️ Document events store)]
+    AG2 --> ST2[(🗃️ Compliance events store)]
+    AG3 --> ST3[(🗃️ Matching events store)]
+    AG4 --> ST4[(🗃️ Payment events store)]
+    AG5 --> ST5[(🗃️ Risk events store)]
+
+    ST1 --> PROJ[📊 Read-model projector]
+    ST2 --> PROJ
+    ST3 --> PROJ
+    ST4 --> PROJ
+    ST5 --> PROJ
+
+    PROJ --> APIQ[🔎 Query API\ndashboard KPIs + timeline views]
+    APIQ --> UI2
+
+    AG5 --> ESC{🚨 High-risk detected?}
+    ESC -- Yes --> HIL[👨‍⚖️ Human-in-the-loop queue]
+    HIL --> CMD
+
+%% -------------------------------------------------------------------
+%% DIAGRAM 6 (Future): Observability, Security, and Reliability Fabric
+%% -------------------------------------------------------------------
+flowchart TB
+    APP2[🖥️ Frontend + API + Agents + Edge] --> OTEL[🛰️ OpenTelemetry collectors]
+    OTEL --> LOGS[(📚 Logs)]
+    OTEL --> MET[(📈 Metrics)]
+    OTEL --> TRC[(🧭 Traces)]
+
+    LOGS --> SIEM[🛡️ SIEM/SOC pipeline]
+    MET --> APM[📉 APM + SLO engine]
+    TRC --> APM
+
+    SIEM --> DET[🚨 Threat detection rules]
+    DET --> RESP[🔒 Automated response\nrevoke tokens, isolate device, step-up auth]
+
+    APM --> REL{📛 Error budget burn?}
+    REL -- Yes --> CB[⛔ Circuit breakers + feature flags]
+    REL -- Yes --> SCALE[📈 Autoscaling + queue backpressure]
+    REL -- No --> OK[✅ Normal operation]
+
+    RESP --> GOV[📜 Immutable audit ledger]
+    CB --> GOV
+    SCALE --> GOV

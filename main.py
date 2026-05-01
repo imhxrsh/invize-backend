@@ -16,6 +16,7 @@ from auth.router import router as auth_router
 from user_profile.router import router as profile_router
 from users.router import router as users_router
 from integrations.router import router as integrations_router
+from gmail.router import router as gmail_router
 from administration.router import router as admin_router
 from agents.payments import payments_router
 from db.prisma import prisma
@@ -116,6 +117,7 @@ def include_domain_routers(application: FastAPI, *, api_prefix: str | None = Non
     application.include_router(profile_router, **kw)
     application.include_router(users_router, **kw)
     application.include_router(integrations_router, **kw)
+    application.include_router(gmail_router, **kw)
     application.include_router(admin_router, **kw)
     application.include_router(payments_router, **kw)
 
@@ -207,7 +209,7 @@ async def agent_hello():
         return {
             "success": True,
             "message": str(result),
-            "model": os.getenv("AGENT_MODEL_NAME", "openai/gpt-oss-20b"),
+            "model": os.getenv("AGENT_MODEL_NAME", "llama-3.3-70b-versatile"),
             "swarms_version": getattr(app.state, "swarms_version", "unknown"),
             "execution_time": duration,
         }

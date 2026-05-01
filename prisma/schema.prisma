@@ -33,6 +33,8 @@ model User {
   org           Org?      @relation(fields: [orgId], references: [id])
   preferences   UserPreferences?
   securityEvents SecurityEvent[]
+  gmailConnection  GmailConnection?
+  gmailScanResults GmailScanResult[]
 }
 
 model Session {
@@ -179,6 +181,49 @@ model IntegrationConfig {
   key       String   @unique
   value     String
   updatedAt DateTime @updatedAt
+}
+
+/// OAuth tokens for Gmail (refresh encrypted at rest).
+model GmailConnection {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId          String    @unique @db.ObjectId
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  googleEmail     String
+  refreshTokenEnc String
+  accessTokenEnc  String?
+  tokenExpiresAt  DateTime?
+  lastHistoryId   String?
+  lastSyncAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+/// Classified Gmail messages (idempotent per user + gmailMessageId).
+model GmailScanResult {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String   @db.ObjectId
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gmailMessageId String
+  threadId       String?
+  subject        String?
+  fromAddr       String?
+  snippet        String?
+  bodyPreview    String?
+  attachmentMeta Json?
+  category       String
+  confidence     Float?
+  reasons        Json?
+  rawAgentResult String?
+  documentJobId  String?
+  pipelineStatus String?
+  pipelineError  String?
+  ingestLog      Json?
+  classifiedAt   DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, gmailMessageId])
+  @@index([userId, category])
+  @@index([userId, documentJobId])
 }
 
 /// Treasury execution is stubbed until a real PSP/bank adapter is wired.
