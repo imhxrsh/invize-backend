@@ -375,6 +375,13 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
         logger.exception("Gmail scan: credentials failed: %s", e)
         return
 
+    if not await prisma.user.find_unique(where={"id": user_id}):
+        logger.warning(
+            "Gmail scan: User id=%s not in database (stale job or bad token) — aborting",
+            user_id,
+        )
+        return
+
     max_n = max(1, min(100, gs.GMAIL_SCAN_MAX_MESSAGES))
     batch_size = max(1, min(max_n, gs.GMAIL_SCAN_BATCH_SIZE))
     batch_sleep_s = max(0.0, min(900.0, gs.GMAIL_SCAN_BATCH_SLEEP_MS / 1000.0))
@@ -472,7 +479,7 @@ async def run_gmail_scan(user_id: str, *, swarms_ok: bool) -> None:
                     },
                     data={
                         "create": {
-                            "user": {"connect": {"id": user_id}},
+                            "userId": user_id,
                             "gmailMessageId": mid,
                             "threadId": thread_id,
                             "subject": subject or None,

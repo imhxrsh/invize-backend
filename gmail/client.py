@@ -14,12 +14,13 @@ from config.gmail_settings import GmailSettings
 from db.prisma import prisma
 from gmail.crypto import decrypt_token, encrypt_token
 
-# Must match what Google returns on token exchange. Web clients often get openid + userinfo
-# with gmail.readonly; if Flow scopes are narrower, oauthlib raises "Scope has changed".
+# Must match what Google returns on token exchange. include_granted_scopes merges prior
+# grants (e.g. gmail.readonly); oauthlib errors if the returned set is not exactly expected.
 SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
+    "https://www.googleapis.com/auth/gmail.readonly",
     # gmail.modify: backend applies an ingest-marker label (not toggling user read/unread).
     "https://www.googleapis.com/auth/gmail.modify",
 ]
