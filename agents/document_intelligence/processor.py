@@ -50,6 +50,39 @@ class DocumentProcessor:
             self._update_status(job_id, DocumentStatus.PROCESSING, "Validating results...")
             validated_data = self._validate_and_normalize(extracted_data)
 
+            # Step 3a: Groq vision (PDF/JPEG rasterized to images per Groq multimodal API)
+            self._update_status(job_id, DocumentStatus.PROCESSING, "Extracting fields (Groq vision)...")
+            try:
+                import os as _os
+
+                from .groq_vision_invoice import (
+                    extract_invoice_with_groq_vision,
+                    merge_vision_invoice_payload,
+                )
+
+                vision_payload = await extract_invoice_with_groq_vision(file_path, job_id)
+                if (
+                    vision_payload
+                    and any(
+                        not str(k).startswith("_")
+                        and vision_payload.get(k) not in (None, "", [], {})
+                        for k in vision_payload
+                    )
+                    and isinstance(validated_data.get("extracted_data"), dict)
+                ):
+                    ow = _os.getenv("GROQ_INVOICE_VISION_OVERWRITE", "true").lower() in (
+                        "1",
+                        "true",
+                        "yes",
+                    )
+                    validated_data["extracted_data"] = merge_vision_invoice_payload(
+                        validated_data["extracted_data"],
+                        vision_payload,
+                        overwrite=ow,
+                    )
+            except Exception as e:
+                logger.warning("Groq vision invoice step skipped for job %s: %s", job_id, e)
+
             # Step 3b: Optional Groq JSON fill for missing totals / invoice # (Context7 groq-python)
             self._update_status(job_id, DocumentStatus.PROCESSING, "Enriching fields (optional LLM)...")
             raw_for_groq = validated_data.get("raw_text") or ""

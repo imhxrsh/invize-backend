@@ -19,6 +19,10 @@ VALID_CATEGORIES = frozenset(
     {"invoice", "receipt", "quote", "contract", "other", "unclear"}
 )
 
+# If the subject/snippet/filename mentions "invoice" but the model says ``other``/``unclear``,
+# still route to the invoice document pipeline with a capped confidence score.
+_INVOICE_SUBJECT_OR_NAME = re.compile(r"\b(invoice|e-?invoice|invoices)\b", re.I)
+
 # Skip Groq when the message is very unlikely to be financial (saves TPM on bulk scans).
 _FINANCE_HINT = re.compile(
     r"\b(invoice|invoices|tax\s*invoice|e-?invoice|bill(ing)?|receipt|payment\s*due|"
@@ -93,6 +97,43 @@ def _heuristic_classify_skip_llm(
     return None
 
 
+def apply_invoice_mention_pipeline_boost(
+    result: Dict[str, Any],
+    *,
+    subject: str,
+    snippet: str,
+    attachments: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    """
+    When subject, snippet, or an attachment filename contains ``invoice`` (word match),
+    ensure category is ``invoice`` if it was not already ``invoice``/``receipt``,
+    so ``_maybe_run_document_pipeline`` still runs for GMAIL_PIPELINE_CATEGORIES.
+    """
+    blob = "\n".join(
+        [
+            subject or "",
+            snippet or "",
+            *[a.get("filename") or "" for a in (attachments or [])],
+        ]
+    )
+    if not _INVOICE_SUBJECT_OR_NAME.search(blob):
+        return result
+    cat = str(result.get("category") or "").lower().strip()
+    if cat in ("invoice", "receipt"):
+        return result
+    reasons = list(result.get("reasons") or [])
+    reasons.append(
+        "Text mentions invoice; category set to invoice for ingest pipeline (confidence capped)."
+    )
+    try:
+        c = float(result.get("confidence"))
+    except (TypeError, ValueError):
+        c = 0.35
+    c = max(0.0, min(1.0, min(c, 0.42)))
+    out = {**result, "category": "invoice", "confidence": c, "reasons": reasons[:12]}
+    return out
+
+
 def _cap_text(s: str, max_chars: int) -> str:
     if max_chars <= 0 or len(s) <= max_chars:
         return s
@@ -127,6 +168,15 @@ def classify_email_payload(
     swarms_ok: bool = True,
 ) -> Dict[str, Any]:
     """Return {category, confidence, reasons, raw_agent_result?, model?, error?}."""
+
+    def _finalize(out: Dict[str, Any]) -> Dict[str, Any]:
+        return apply_invoice_mention_pipeline_boost(
+            out,
+            subject=subject,
+            snippet=snippet,
+            attachments=attachments,
+        )
+
     base = {
         "category": "unclear",
         "confidence": 0.0,
@@ -134,20 +184,20 @@ def classify_email_payload(
     }
     if not swarms_ok:
         base["error"] = "swarms_unavailable"
-        return base
+        return _finalize(base)
 
     early = _heuristic_classify_skip_llm(
         subject=subject, snippet=snippet, attachments=attachments
     )
     if early is not None:
-        return {**base, **early}
+        return _finalize({**base, **early})
 
     try:
         from swarms import Agent
     except Exception as e:
         logger.warning("Swarms unavailable for email classification: %s", e)
         base["error"] = "swarms_import_failed"
-        return base
+        return _finalize(base)
 
     model_name = get_email_classification_model_name()
     # Groq free tier TPM treats (prompt + max_tokens) as the request budget; Swarms defaults
@@ -168,6 +218,8 @@ def classify_email_payload(
         f"AP email triage. JSON in: subject,from,date,snippet,body_text,attachments[]. "
         f"category ∈ {{{cats}}} lowercase. "
         "invoice=bill/due; receipt=paid; quote=estimate; contract=legal; other=non-financial; unclear=ambiguous. "
+        "If subject or snippet contains the word invoice (e.g. merchant 'Your order invoice'), prefer category invoice "
+        "even when attachment filenames are generic (order.pdf). "
         "Use attachment names (e.g. Invoice.pdf). Reply JSON only: "
         '{"category":"…","confidence":0.0,"reasons":["…"]}'
     )
@@ -202,24 +254,28 @@ def classify_email_payload(
         duration = time.time() - start
         objs = json_loads_object_candidates(raw_str)
         if not objs:
-            return {
-                **base,
-                "raw_agent_result": raw_str[:8000],
-                "model": model_name,
-                "error": "json_parse_failed",
-                "execution_time": duration,
-            }
+            return _finalize(
+                {
+                    **base,
+                    "raw_agent_result": raw_str[:8000],
+                    "model": model_name,
+                    "error": "json_parse_failed",
+                    "execution_time": duration,
+                }
+            )
         # Last JSON object in the reply usually contains the final classification.
         parsed = normalize_email_classification_dict(objs[-1])
-        return {
-            "category": parsed["category"],
-            "confidence": parsed["confidence"],
-            "reasons": parsed["reasons"],
-            "raw_agent_result": raw_str[:8000],
-            "model": model_name,
-            "execution_time": duration,
-            "parse_ok": True,
-        }
+        return _finalize(
+            {
+                "category": parsed["category"],
+                "confidence": parsed["confidence"],
+                "reasons": parsed["reasons"],
+                "raw_agent_result": raw_str[:8000],
+                "model": model_name,
+                "execution_time": duration,
+                "parse_ok": True,
+            }
+        )
     except Exception as e:
         logger.warning("Email classification agent failed: %s", e)
-        return {**base, "error": str(e)[:500]}
+        return _finalize({**base, "error": str(e)[:500]})

@@ -65,7 +65,8 @@ async def enrich_extracted_with_groq(
     if not api_key:
         return extracted
 
-    model = os.getenv("GROQ_EXTRACTION_MODEL", "llama-3.3-70b-versatile")
+    raw_model = os.getenv("GROQ_EXTRACTION_MODEL", "llama-3.3-70b-versatile").strip()
+    model = raw_model[5:].lstrip("/") if raw_model.lower().startswith("groq/") else raw_model
 
     try:
         from groq import Groq
