@@ -56,6 +56,11 @@ def _jpeg_quality() -> int:
     return max(55, min(95, int(os.getenv("GROQ_INVOICE_VISION_JPEG_QUALITY", "82"))))
 
 
+def _vision_max_tokens() -> int:
+    """GST tables + line items need a generous completion budget."""
+    return max(1024, min(8192, int(os.getenv("GROQ_INVOICE_VISION_MAX_TOKENS", "4096"))))
+
+
 def _rasterize_to_jpeg_paths(file_path: Path, job_id: str) -> List[Path]:
     """Return paths to temporary JPEGs (caller may delete parent job dir later)."""
     out_dir = TEMP_DIR / job_id / "groq_vision"
@@ -235,21 +240,45 @@ def _call_groq_vision_sync(image_b64_list: List[str], job_id: str) -> Optional[D
 
     model = _vision_model()
     keys_doc = (
-        "supplier, buyer, bill_to, invoice_number, date, due_date, currency, "
-        "subtotal, tax, total, po_number, line_items (array of "
-        "{description, quantity, unit_price, amount}). "
-        "Use null if not visible. Numbers as JSON numbers."
+        "supplier, supplier_address, supplier_tax_id, buyer, bill_to, ship_to, "
+        "invoice_number, date, due_date, currency, currency_symbol, "
+        "subtotal, tax, total, tax_rate, po_number, payment_terms, gstin, notes, "
+        "line_items (array of {description, quantity, unit_price, amount, item_code}). "
+        "Use null if not visible. All monetary values as JSON numbers (no currency symbols)."
     )
     system = (
-        "You read invoice and receipt images. Return exactly one JSON object with keys: "
-        f"{keys_doc}. "
-        "supplier = legal name of the issuer/vendor on the letterhead, not the customer. "
-        "total = amount payable / grand total when shown. "
-        "Do not invent values not supported by the images."
+        "You are an expert at reading tax invoices and bills of supply from images (including Indian GST formats). "
+        f"Return exactly one JSON object. Allowed keys only: {keys_doc}\n\n"
+        "Party fields:\n"
+        "- supplier: Legal business name of the SELLER / ISSUER (letterhead, 'Sold by', remit-to, signature block). "
+        "Never use the school, college, or customer's name here.\n"
+        "- buyer: Legal name of the purchaser / customer (often 'Bill to', 'Buyer', 'Consignee' when that is the customer).\n"
+        "- bill_to / ship_to: addresses if shown separately from buyer name.\n"
+        "- supplier_tax_id: Seller's GSTIN/UIN only (usually near supplier address). "
+        "- gstin: Prefer the BUYER's GSTIN if the document labels 'Buyer GSTIN' / 'GSTIN/UIN of Buyer'; otherwise null.\n\n"
+        "Money fields (critical):\n"
+        "- total: The FINAL amount payable / 'Total Amount' / 'Grand Total' AFTER tax, round-off, and discounts. "
+        "This is usually the largest bold figure at the bottom and may appear with ₹ or 'Rs.'. "
+        "If the document shows BOTH a pre-tax subtotal AND a higher tax-inclusive total, total MUST be the tax-inclusive one.\n"
+        "- subtotal: Taxable value / 'Total' column sum BEFORE CGST+SGST+IGST / amount before tax — NOT the same as total when GST lines exist. "
+        "If only one clear total line exists, put it in total and set subtotal null.\n"
+        "- tax: Sum of all tax amounts shown (e.g. Output CGST + Output SGST, or IGST). If separate lines, add them into one number.\n"
+        "- tax_rate: Combined or headline rate if stated (e.g. 18 for 18%% GST); null if unclear.\n\n"
+        "Line items:\n"
+        "- Read the printed TABLE: description from the goods column; quantity from Qty/PCS column; "
+        "unit_price from Rate/Price per unit (NOT the HSN code); amount from the line Amount column (row total).\n"
+        "- item_code: HSN/SAC if present.\n"
+        "- Include every material line; skip blank spacer rows.\n\n"
+        "Other:\n"
+        "- invoice_number: the invoice/challan number (e.g. 1004/25-26), not the GSTIN.\n"
+        "- date: invoice date as printed (prefer ISO YYYY-MM-DD if you can infer; else exact text).\n"
+        "- currency: ISO code (INR for rupee invoices).\n"
+        "- Cross-check: if 'Amount in words' or similar exists, it must match your total.\n"
+        "Do not invent figures; use null when illegible."
     )
     user_text = (
-        f"Extract invoice fields from these {len(image_b64_list)} image(s) "
-        "(document page order). JSON only."
+        f"Read all {len(image_b64_list)} page image(s) in order. Extract the JSON. "
+        "Double-check total vs subtotal+tax on Indian GST invoices before responding."
     )
 
     content: List[Dict[str, Any]] = [{"type": "text", "text": user_text}]
@@ -269,7 +298,7 @@ def _call_groq_vision_sync(image_b64_list: List[str], job_id: str) -> Optional[D
             {"role": "user", "content": content},
         ],
         temperature=0.05,
-        max_tokens=2048,
+        max_tokens=_vision_max_tokens(),
         response_format={"type": "json_object"},
     )
     raw = (completion.choices[0].message.content or "").strip()

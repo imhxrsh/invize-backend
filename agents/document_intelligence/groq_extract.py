@@ -76,17 +76,20 @@ async def enrich_extracted_with_groq(
 
     snippet = _truncate_text(raw_text)
     system = (
-        "You extract structured invoice fields from noisy OCR/PDF text. "
+        "You extract structured invoice fields from noisy OCR/PDF text (retail, B2B, Indian GST tax invoices). "
         "Return exactly one JSON object. Use null when a value is not clearly supported by the text—do not invent "
         "invoice numbers, POs, or totals. "
         f"Only these keys are allowed (no extras): {json.dumps(_FILL_KEYS)}. "
-        "Numbers: JSON numbers only (no symbols); for Indian lakhs/crores or thousand separators, normalize to a plain number. "
-        "Totals: prefer 'Grand total', 'Total due', 'Amount payable' over intermediate subtotals if they conflict. "
-        "supplier: legal name of the issuer (letterhead, seller, vendor GSTIN block, 'From', remit-to). Never put the customer here. "
-        "buyer: purchasing entity; bill_to: bill-to / ship-to line if different from buyer. "
-        "If labels pair Vendor vs Bill to / Sold to / Customer, map accordingly. "
-        "Dates: ISO YYYY-MM-DD when unambiguous; otherwise the shortest faithful substring from the document. "
-        "currency: ISO 4217 (INR, USD, EUR). "
+        "Numbers: JSON numbers only (no symbols); strip thousand separators and normalize Indian number formats to plain floats. "
+        "total: MUST be the final amount payable / grand total AFTER tax and round-off (often bold, near ₹ or 'Total Amount'). "
+        "Never use a pre-tax table sum or taxable value as total when the document also shows a higher tax-inclusive total. "
+        "subtotal: taxable value / amount before GST when explicitly labeled; null if ambiguous. "
+        "tax: sum of all tax lines (CGST+SGST, IGST, VAT, etc.) when split; one combined number. "
+        "supplier: seller/issuer legal name (letterhead, vendor GSTIN block). Never the buyer/college/customer name. "
+        "buyer: purchaser; bill_to: bill-to / consignee text if distinct. "
+        "If labels pair Vendor vs Bill to / Buyer GSTIN, map accordingly. "
+        "Dates: ISO YYYY-MM-DD when unambiguous; else shortest faithful substring. "
+        "currency: ISO 4217 (INR when rupees). "
         "po_number: only explicit PO / purchase order references."
     )
     user = f"OCR text:\n{snippet}"
