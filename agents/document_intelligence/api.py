@@ -8,7 +8,7 @@ import logging
 import os
 import mimetypes
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 from datetime import datetime, timezone
 
 from pydantic import ValidationError
@@ -35,6 +35,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["Document Intelligence"])
 processor = DocumentProcessor()
+
+
+def _progress_from_status(status_data: dict) -> Tuple[Optional[str], Optional[List[str]]]:
+    """Current progress line and ordered history for UIs that poll `/result` or `/status`."""
+    prog = status_data.get("progress")
+    if prog is not None:
+        prog = str(prog) if prog else None
+    raw_hist = status_data.get("progress_history")
+    hist = None
+    if isinstance(raw_hist, list):
+        hist = [str(x) for x in raw_hist if x is not None]
+    return prog, hist
 
 
 def _parse_stored_document_result(job_id: str, result_data: dict) -> DocumentResultResponse:
@@ -310,19 +322,24 @@ async def get_document_result(job_id: str, _user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Failed to read status")
     
     status = status_data.get("status", DocumentStatus.PENDING)
+    prog, hist = _progress_from_status(status_data)
     
     if status == DocumentStatus.PENDING or status == DocumentStatus.PROCESSING:
         return DocumentResultResponse(
             job_id=job_id,
             status=status,
-            error=None
+            error=None,
+            progress=prog,
+            progress_history=hist,
         )
     
     if status == DocumentStatus.FAILED:
         return DocumentResultResponse(
             job_id=job_id,
             status=status,
-            error=status_data.get("error", "Processing failed")
+            error=status_data.get("error", "Processing failed"),
+            progress=prog,
+            progress_history=hist,
         )
     
     # Read result if completed
@@ -330,14 +347,22 @@ async def get_document_result(job_id: str, _user=Depends(get_current_user)):
         return DocumentResultResponse(
             job_id=job_id,
             status=DocumentStatus.FAILED,
-            error="Result file not found"
+            error="Result file not found",
+            progress=prog,
+            progress_history=hist,
         )
     
     try:
         with open(result_file, "r") as f:
             result_data = json.load(f)
 
-        return _parse_stored_document_result(job_id, result_data)
+        parsed = _parse_stored_document_result(job_id, result_data)
+        return parsed.model_copy(
+            update={
+                "progress": prog,
+                "progress_history": hist,
+            }
+        )
 
     except HTTPException:
         raise

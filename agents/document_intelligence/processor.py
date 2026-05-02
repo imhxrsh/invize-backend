@@ -136,6 +136,12 @@ class DocumentProcessor:
             
             # Calculate processing time
             processing_time = time.time() - start_time
+
+            _ed = validated_data.get("extracted_data") or {}
+            pipeline_meta = {
+                "groq_vision": bool(_ed.get("_groq_vision_enriched")),
+                "groq_text_enrich": bool(_ed.get("_groq_enriched")),
+            }
             
             # Save final result
             result = {
@@ -149,6 +155,7 @@ class DocumentProcessor:
                 "agent_analysis": analysis,
                 "verification_compliance": verification_compliance or None,
                 "matching_erp": matching_erp_result or None,
+                "pipeline_meta": pipeline_meta,
             }
             
             result_file = UPLOADS_DIR / f"{job_id}_result.json"

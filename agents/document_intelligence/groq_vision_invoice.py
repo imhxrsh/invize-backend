@@ -130,6 +130,8 @@ def _parse_line_items(raw: Any) -> List[Dict[str, Any]]:
             v = row[k]
             if k == "description":
                 item[k] = str(v).strip() if v is not None else None
+            elif k == "item_code":
+                item[k] = str(v).strip() if v is not None and str(v).strip() != "" else None
             else:
                 if v is None or v == "":
                     item[k] = None
