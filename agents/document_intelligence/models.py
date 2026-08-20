@@ -133,5 +133,5 @@ class DocumentResultResponse(BaseModel):
     # Echoed from status while processing, or last snapshot when completed — keeps one GET coherent for UIs.
     progress: Optional[str] = None
     progress_history: Optional[List[str]] = None
-    """How structured fields were produced (for UI badges / support)."""
+    # How structured fields were produced (for UI badges / support).
     pipeline_meta: Optional[Dict[str, Any]] = None
